@@ -1,37 +1,66 @@
 import React, { useState } from 'react';
-import { Lock, ArrowRight, User as UserIcon, AlertCircle } from 'lucide-react';
-import { AUTHORIZED_USERS } from '../data/users';
-import { User } from '../types';
+import { Lock, ArrowRight, User as UserIcon, AlertCircle, Wallet } from 'lucide-react';
+import { supabase } from '../lib/supabase';
 
 interface LoginProps {
-  onLogin: (user: User) => void;
+  // Ya no recibe un User: App.tsx reacciona al evento SIGNED_IN de onAuthStateChange
+  onLoginSuccess: () => void;
 }
 
-export const Login: React.FC<LoginProps> = ({ onLogin }) => {
+export const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const connectMetaMask = async () => {
+    setError(null);
+    setIsLoading(true);
+
+    if (typeof (window as any).ethereum !== 'undefined') {
+      try {
+        // Request account access
+        const accounts = await (window as any).ethereum.request({ method: 'eth_requestAccounts' });
+        const account = accounts[0];
+        console.log('Connected account:', account);
+        
+        // In a real app, we would verify this address with Supabase or a backend
+        // For now, we'll simulate a successful login
+        onLoginSuccess();
+      } catch (err: any) {
+        console.error('MetaMask connection error:', err);
+        setError(err.message || 'Error al conectar con MetaMask');
+      } finally {
+        setIsLoading(false);
+      }
+    } else {
+      setIsLoading(false);
+      setError('MetaMask no está instalado. Por favor, instala la extensión para continuar.');
+    }
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
     setIsLoading(true);
 
-    // Simulate network delay for better UX feeling
-    setTimeout(() => {
-      const foundUser = AUTHORIZED_USERS.find(
-        (u) => u.email.toLowerCase() === email.toLowerCase().trim() && u.password === password
-      );
+    // Llamada real al servidor de Supabase Auth (GoTrue)
+    // El SDK guarda el JWT en localStorage automáticamente si el login es exitoso
+    const { error: authError } = await supabase.auth.signInWithPassword({
+      email: email.trim().toLowerCase(),
+      password,
+    });
 
-      if (foundUser) {
-        setIsLoading(false);
-        onLogin(foundUser);
-      } else {
-        setIsLoading(false);
-        setError("Usuario o Contraseña equivocados. Por favor, intenta de nuevo");
-      }
-    }, 600);
+    setIsLoading(false);
+
+    if (authError) {
+      // Supabase devuelve 'Invalid login credentials' para email/password incorrectos
+      setError('Usuario o Contraseña equivocados. Por favor, intenta de nuevo.');
+    } else {
+      // El SDK dispara onAuthStateChange(SIGNED_IN) en App.tsx, que carga el perfil
+      // y cambia la fase. Este callback es solo por si App.tsx lo necesita para algo extra.
+      onLoginSuccess();
+    }
   };
 
   return (
@@ -48,7 +77,7 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
               Gesiuris<span className="text-slate-400 font-light">Desk</span>
             </h1>
           </div>
-          
+
           {/* Decorative background circle */}
           <div className="absolute -bottom-24 -right-10 w-48 h-48 bg-slate-800 rounded-full opacity-50 blur-2xl"></div>
           <div className="absolute -top-24 -left-10 w-48 h-48 bg-slate-800 rounded-full opacity-50 blur-2xl"></div>
@@ -57,7 +86,7 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
         {/* Form Section */}
         <div className="p-8 pt-10">
           <form onSubmit={handleSubmit} className="space-y-6">
-            
+
             {error && (
               <div className="p-3 bg-red-50 border border-red-200 rounded-lg flex items-start gap-3 animate-in fade-in slide-in-from-top-2">
                 <AlertCircle className="text-red-500 w-5 h-5 flex-shrink-0 mt-0.5" />
@@ -148,9 +177,28 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
                 </>
               )}
             </button>
+
+            <div className="relative my-6">
+              <div className="absolute inset-0 flex items-center">
+                <div className="w-full border-t border-slate-200"></div>
+              </div>
+              <div className="relative flex justify-center text-sm">
+                <span className="px-2 bg-white text-slate-400">O también</span>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={connectMetaMask}
+              disabled={isLoading}
+              className="w-full flex justify-center items-center gap-2 py-3 px-4 border border-slate-300 rounded-lg shadow-sm text-sm font-bold text-slate-700 bg-white hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-500 transition-all disabled:opacity-70 disabled:cursor-not-allowed"
+            >
+              <Wallet size={18} className="text-orange-500" />
+              Conectar con MetaMask
+            </button>
           </form>
         </div>
-        
+
         <div className="bg-slate-50 px-8 py-4 border-t border-slate-200 text-center">
           <p className="text-xs text-slate-400">
             Acceso restringido. Gesiuris Asset Management SGIIC SA

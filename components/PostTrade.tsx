@@ -1,19 +1,26 @@
 import React, { useState } from 'react';
-import { PostTradeOrder, PostTradeOrderStatus, PostTradeExecutionData, User } from '../types';
-import { CheckCircle, HelpCircle, Pin, Search, RotateCcw, PlusCircle, X, Save, Calendar, Clock, DollarSign, FileText, FileSpreadsheet } from 'lucide-react';
+import { PostTradeOrder, PostTradeOrderStatus, PostTradeExecutionData, User, Fund } from '../types';
+import { FundSelector } from './FundSelector';
+import { CheckCircle, HelpCircle, Pin, Search, RotateCcw, PlusCircle, X, Save, Calendar, Clock, DollarSign, FileText, FileSpreadsheet, ListFilter } from 'lucide-react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import * as XLSX from 'xlsx';
 
 interface PostTradeProps {
+  selectedFundId: string | null;
+  funds: Fund[];
+  onFundChange: (id: string) => void;
   orders: PostTradeOrder[];
   setOrders: React.Dispatch<React.SetStateAction<PostTradeOrder[]>>;
   onReturnToPreTrade: (orderId: string) => void;
+  onUpdateOrder?: (orderId: string, updates: Partial<Pick<PostTradeOrder, 'status' | 'processedBy' | 'processedAt' | 'executionData'>>) => void;
   currentUser: User | null;
 }
 
-export const PostTrade: React.FC<PostTradeProps> = ({ orders, setOrders, onReturnToPreTrade, currentUser }) => {
+export const PostTrade: React.FC<PostTradeProps> = ({ selectedFundId, funds, onFundChange, orders, setOrders, onReturnToPreTrade, onUpdateOrder, currentUser }) => {
   const [searchQuery, setSearchQuery] = useState('');
+  const [showAllFunds, setShowAllFunds] = useState(false);
+  const [dateFilter, setDateFilter] = useState('');
   const [selectedOrder, setSelectedOrder] = useState<PostTradeOrder | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
 
@@ -22,17 +29,21 @@ export const PostTrade: React.FC<PostTradeProps> = ({ orders, setOrders, onRetur
     status: 'EJECUTADA' | 'VIVA';
     orderType: 'A mercado' | 'Limitada' | 'Al Average';
     broker: 'GVC Gaesco' | 'Renta 4' | 'Nomura' | 'Bestinver' | 'Bankinter';
+    depositary: 'CACEIS' | 'BNP' | 'Bankinter';
     callTime: string;
     executionPrice: string;
     validityDate: string;
+    valueDate: string;
     notes: string;
   }>({
     status: 'EJECUTADA',
     orderType: 'A mercado',
     broker: 'GVC Gaesco',
+    depositary: 'CACEIS',
     callTime: '',
     executionPrice: '',
     validityDate: '',
+    valueDate: '',
     notes: ''
   });
 
@@ -42,10 +53,12 @@ export const PostTrade: React.FC<PostTradeProps> = ({ orders, setOrders, onRetur
       setFormData({
         status: order.status === 'SIN_DATOS' ? 'EJECUTADA' : (order.status as 'EJECUTADA' | 'VIVA'),
         orderType: order.executionData.orderType,
-        broker: order.executionData.broker,
+        broker: order.executionData.broker || 'GVC Gaesco',
+        depositary: order.executionData.depositary || 'CACEIS',
         callTime: order.executionData.callTime,
         executionPrice: order.executionData.executionPrice?.toString() || '',
         validityDate: order.executionData.validityDate || '',
+        valueDate: order.executionData.valueDate || '',
         notes: order.executionData.notes || ''
       });
     } else {
@@ -53,9 +66,11 @@ export const PostTrade: React.FC<PostTradeProps> = ({ orders, setOrders, onRetur
         status: 'EJECUTADA',
         orderType: 'A mercado',
         broker: 'GVC Gaesco',
+        depositary: 'CACEIS',
         callTime: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         executionPrice: order.price ? order.price.toString() : '',
         validityDate: new Date().toISOString().split('T')[0],
+        valueDate: order.valueDate || new Date().toISOString().split('T')[0],
         notes: ''
       });
     }
@@ -67,23 +82,31 @@ export const PostTrade: React.FC<PostTradeProps> = ({ orders, setOrders, onRetur
 
     const executionData: PostTradeExecutionData = {
       orderType: formData.orderType,
-      broker: formData.broker,
+      broker: selectedOrder.operationType === 'Divisa' ? undefined : formData.broker,
+      depositary: selectedOrder.operationType === 'Divisa' ? formData.depositary : undefined,
       callTime: formData.callTime,
       executionPrice: formData.executionPrice ? parseFloat(formData.executionPrice) : undefined,
       validityDate: formData.validityDate || undefined,
+      valueDate: selectedOrder.operationType === 'Divisa' ? formData.valueDate : undefined,
       notes: formData.notes
     };
 
-    setOrders(prev => prev.map(o => 
-      o.id === selectedOrder.id 
-        ? { 
-            ...o, 
-            status: formData.status, 
-            executionData,
-            processedAt: new Date().toISOString()
-          } 
-        : o
+    const updates = {
+      status: formData.status as PostTradeOrderStatus,
+      executionData,
+      processedAt: new Date().toISOString(),
+    };
+
+    // Optimistic update en UI
+    setOrders(prev => prev.map(o =>
+      o.id === selectedOrder.id ? { ...o, ...updates } : o
     ));
+
+    // Persistir en DB
+    if (onUpdateOrder) {
+      onUpdateOrder(selectedOrder.id, updates);
+    }
+
     setIsModalOpen(false);
   };
 
@@ -103,6 +126,16 @@ export const PostTrade: React.FC<PostTradeProps> = ({ orders, setOrders, onRetur
 
     const tableBody = ordersToPrint.map(row => {
       const price = row.executionData?.executionPrice ?? row.price;
+      const brokerOrDepositary = row.operationType === 'Divisa' 
+        ? row.executionData?.depositary || '-' 
+        : row.executionData?.broker || '-';
+      
+      const statusOrValueDate = row.operationType === 'Divisa' && row.executionData?.valueDate
+        ? `FV: ${new Date(row.executionData.valueDate).toLocaleDateString('es-ES')}`
+        : (row.status === 'VIVA' && row.executionData?.validityDate 
+            ? new Date(row.executionData.validityDate).toLocaleDateString('es-ES') 
+            : row.status);
+
       return [
         row.fundId || '-',
         row.fundName || '-',
@@ -111,17 +144,15 @@ export const PostTrade: React.FC<PostTradeProps> = ({ orders, setOrders, onRetur
         row.quantity.toLocaleString('es-ES'),
         price.toLocaleString('es-ES', { minimumFractionDigits: 4, maximumFractionDigits: 4 }),
         row.executionData?.callTime || '-',
-        row.executionData?.broker || '-',
+        brokerOrDepositary,
         row.executionData?.notes || '-',
-        row.status === 'VIVA' && row.executionData?.validityDate 
-          ? new Date(row.executionData.validityDate).toLocaleDateString('es-ES') 
-          : row.status
+        statusOrValueDate
       ];
     });
 
     autoTable(doc, {
       startY: 40,
-      head: [['Cód. IIC', 'Nombre IIC', 'C/V', 'Ticker', 'Títulos', 'Precio', 'Hora', 'Bróker', 'Obs.', 'Estado']],
+      head: [['Cód. IIC', 'Nombre IIC', 'C/V', 'Ticker', 'Títulos', 'Precio', 'Hora', 'Bróker/Dep.', 'Obs.', 'Estado/FV']],
       body: tableBody,
       theme: 'grid',
       headStyles: { fillColor: [63, 63, 65], textColor: [255, 255, 255], fontSize: 8 },
@@ -152,6 +183,16 @@ export const PostTrade: React.FC<PostTradeProps> = ({ orders, setOrders, onRetur
 
     const data = ordersToPrint.map(row => {
       const price = row.executionData?.executionPrice ?? row.price;
+      const brokerOrDepositary = row.operationType === 'Divisa' 
+        ? row.executionData?.depositary || '-' 
+        : row.executionData?.broker || '-';
+      
+      const statusOrValueDate = row.operationType === 'Divisa' && row.executionData?.valueDate
+        ? `FV: ${new Date(row.executionData.valueDate).toLocaleDateString('es-ES')}`
+        : (row.status === 'VIVA' && row.executionData?.validityDate 
+            ? new Date(row.executionData.validityDate).toLocaleDateString('es-ES') 
+            : row.status);
+
       return {
         'Código IIC': row.fundId || '-',
         'Nombre IIC': row.fundName || '-',
@@ -160,11 +201,9 @@ export const PostTrade: React.FC<PostTradeProps> = ({ orders, setOrders, onRetur
         'Títulos': row.quantity,
         'Precio': price.toLocaleString('es-ES', { minimumFractionDigits: 4, maximumFractionDigits: 4 }),
         'Hora Grabación': row.executionData?.callTime || '-',
-        'Bróker': row.executionData?.broker || '-',
+        'Bróker/Dep.': brokerOrDepositary,
         'Observaciones': row.executionData?.notes || '-',
-        'Estado': row.status === 'VIVA' && row.executionData?.validityDate 
-          ? new Date(row.executionData.validityDate).toLocaleDateString('es-ES') 
-          : row.status
+        'Estado/FV': statusOrValueDate
       };
     });
 
@@ -174,11 +213,26 @@ export const PostTrade: React.FC<PostTradeProps> = ({ orders, setOrders, onRetur
     XLSX.writeFile(wb, `Boleta_PostTrade_${Date.now()}.xlsx`);
   };
 
-  const filteredOrders = orders.filter(order =>
-    order.asset.ticker.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    order.asset.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    order.status.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const filteredOrders = orders.filter(order => {
+    // 1. Filter by Fund
+    if (!showAllFunds && selectedFundId && order.fundId !== selectedFundId) {
+      return false;
+    }
+
+    // 2. Filter by Date
+    if (dateFilter) {
+      const orderDate = order.processedAt ? new Date(order.processedAt).toISOString().split('T')[0] : '';
+      if (orderDate !== dateFilter) return false;
+    }
+
+    // 3. Filter by Search Query
+    return (
+      order.asset.ticker.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      order.asset.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      order.status.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (order.fundName && order.fundName.toLowerCase().includes(searchQuery.toLowerCase()))
+    );
+  });
 
   const getStatusConfig = (status: PostTradeOrderStatus) => {
     switch (status) {
@@ -206,8 +260,55 @@ export const PostTrade: React.FC<PostTradeProps> = ({ orders, setOrders, onRetur
 
   return (
     <div className="max-w-6xl mx-auto space-y-6 animate-in fade-in">
-      <h2 className="text-3xl font-bold text-slate-900 tracking-tight">Post-Trade: Gestión de Órdenes</h2>
-      <p className="text-slate-500">Revisa y actualiza el estado de las órdenes ejecutadas.</p>
+      <div className="flex justify-between items-center">
+        <div>
+          <h2 className="text-3xl font-bold text-slate-900 tracking-tight">Post-Trade: Gestión de Órdenes</h2>
+          <p className="text-slate-500">Revisa y actualiza el estado de las órdenes ejecutadas.</p>
+        </div>
+        <div className="flex items-center gap-4">
+          <div className="flex items-center gap-2 bg-white p-1 rounded-lg border border-slate-200 shadow-sm">
+            <button
+              onClick={() => setShowAllFunds(!showAllFunds)}
+              className={`px-3 py-1.5 rounded-md text-xs font-bold flex items-center gap-2 transition-colors ${
+                showAllFunds 
+                  ? 'bg-brand-600 text-white shadow-sm' 
+                  : 'text-slate-500 hover:bg-slate-50'
+              }`}
+            >
+              <ListFilter size={14} />
+              {showAllFunds ? 'Todos los Fondos' : 'Por Fondo'}
+            </button>
+            
+            {!showAllFunds && (
+              <div className="w-64">
+                <FundSelector 
+                  selectedFundId={selectedFundId || ''} 
+                  funds={funds} 
+                  onFundChange={onFundChange} 
+                />
+              </div>
+            )}
+          </div>
+
+          <div className="relative">
+            <Calendar size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+            <input 
+              type="date" 
+              className="pl-9 pr-8 py-2 border border-slate-200 rounded-lg text-sm focus:ring-brand-500 focus:border-brand-500 bg-white shadow-sm"
+              value={dateFilter}
+              onChange={(e) => setDateFilter(e.target.value)}
+            />
+            {dateFilter && (
+              <button 
+                onClick={() => setDateFilter('')}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+              >
+                ×
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
 
       <div className="relative mb-6">
         <Search size={20} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
@@ -240,8 +341,53 @@ export const PostTrade: React.FC<PostTradeProps> = ({ orders, setOrders, onRetur
                     </span>
                   </div>
                   
-                  <h3 className="text-lg font-bold text-slate-800 leading-tight mb-1">{order.asset.name}</h3>
-                  <div className="text-xs font-bold text-slate-500 mb-4">{order.asset.ticker}</div>
+                  <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1 truncate" title={order.fundName}>
+                    {order.fundName || order.fundId}
+                  </div>
+                  <h3 className="text-lg font-bold text-slate-800 leading-tight mb-1" title={order.asset.name}>
+                    {order.asset.ticker && order.asset.ticker.startsWith('POS-') ? order.asset.name : order.asset.name || order.asset.ticker}
+                  </h3>
+                  {order.asset.ticker && !order.asset.ticker.startsWith('POS-') && (
+                    <div className="text-xs font-bold text-brand-600 mb-4 uppercase tracking-wider">{order.asset.ticker}</div>
+                  )}
+                  {(!order.asset.ticker || order.asset.ticker.startsWith('POS-')) && <div className="mb-4"></div>}
+                  
+                  {order.operationType === 'Derivados' && (
+                    <div className="mb-4 flex flex-wrap gap-1">
+                      {order.derivativeAction && (
+                        <span className={`text-[9px] px-1 rounded font-bold uppercase ${
+                          order.derivativeAction === 'Abrir' ? 'bg-blue-100 text-blue-700' : 'bg-orange-100 text-orange-700'
+                        }`}>
+                          {order.derivativeAction}
+                        </span>
+                      )}
+                      {order.derivativeInstrumentType && (
+                        <span className="text-[9px] px-1 bg-indigo-100 text-indigo-700 rounded font-bold uppercase">
+                          {order.derivativeInstrumentType}
+                        </span>
+                      )}
+                      {order.delta !== undefined && (
+                        <span className="text-[9px] px-1 bg-teal-100 text-teal-700 rounded font-bold uppercase">
+                          Delta: {order.delta.toFixed(2)}
+                        </span>
+                      )}
+                      {order.underlying && (
+                        <span className="text-[9px] px-1 bg-stone-100 text-stone-700 rounded font-bold uppercase">
+                          Sub: {order.underlying}
+                        </span>
+                      )}
+                      {order.maturity && (
+                        <span className="text-[9px] px-1 bg-stone-100 text-stone-700 rounded font-bold uppercase">
+                          Venc: {order.maturity}
+                        </span>
+                      )}
+                      {order.commitment !== undefined && (
+                        <span className="text-[9px] px-1 bg-blue-50 text-blue-600 rounded font-bold uppercase">
+                          Compromiso: {order.commitment.toLocaleString('es-ES')}€
+                        </span>
+                      )}
+                    </div>
+                  )}
                   
                   <div className="bg-slate-50 rounded-lg p-3 mb-4 border border-slate-100">
                     <div className="flex justify-between items-center text-sm mb-1">
@@ -251,7 +397,7 @@ export const PostTrade: React.FC<PostTradeProps> = ({ orders, setOrders, onRetur
                       <span className="font-mono font-bold text-slate-700">{order.quantity.toLocaleString()} tit.</span>
                     </div>
                     <div className="flex justify-between items-center text-xs text-slate-500">
-                      <span>Precio Límite:</span>
+                      <span>Precio Subyacente:</span>
                       <span className="font-mono">{order.price.toFixed(2)} {order.currency}</span>
                     </div>
                   </div>
@@ -260,9 +406,15 @@ export const PostTrade: React.FC<PostTradeProps> = ({ orders, setOrders, onRetur
                   {order.executionData && (
                     <div className="mb-4 text-xs text-slate-500 space-y-1 bg-slate-50/50 p-2 rounded border border-slate-100">
                       <div className="flex justify-between">
-                        <span>Bróker:</span>
-                        <span className="font-bold">{order.executionData.broker}</span>
+                        <span>{order.operationType === 'Divisa' ? 'Depositario:' : 'Bróker:'}</span>
+                        <span className="font-bold">{order.operationType === 'Divisa' ? order.executionData.depositary : order.executionData.broker}</span>
                       </div>
+                      {order.operationType === 'Divisa' && order.executionData.valueDate && (
+                        <div className="flex justify-between">
+                          <span>Fecha Valor:</span>
+                          <span className="font-bold">{new Date(order.executionData.valueDate).toLocaleDateString('es-ES')}</span>
+                        </div>
+                      )}
                       <div className="flex justify-between">
                         <span>Tipo:</span>
                         <span>{order.executionData.orderType}</span>
@@ -376,20 +528,34 @@ export const PostTrade: React.FC<PostTradeProps> = ({ orders, setOrders, onRetur
                   </select>
                 </div>
 
-                {/* Broker */}
+                  {/* Broker or Depositary */}
                 <div>
-                  <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Bróker</label>
-                  <select 
-                    className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-brand-500 focus:border-brand-500 bg-white"
-                    value={formData.broker}
-                    onChange={e => setFormData({...formData, broker: e.target.value as any})}
-                  >
-                    <option value="GVC Gaesco">GVC Gaesco</option>
-                    <option value="Renta 4">Renta 4</option>
-                    <option value="Nomura">Nomura</option>
-                    <option value="Bestinver">Bestinver</option>
-                    <option value="Bankinter">Bankinter</option>
-                  </select>
+                  <label className="block text-xs font-bold text-slate-500 uppercase mb-1">
+                    {selectedOrder.operationType === 'Divisa' ? 'Depositario' : 'Bróker'}
+                  </label>
+                  {selectedOrder.operationType === 'Divisa' ? (
+                    <select 
+                      className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-brand-500 focus:border-brand-500 bg-white"
+                      value={formData.depositary}
+                      onChange={e => setFormData({...formData, depositary: e.target.value as any})}
+                    >
+                      <option value="CACEIS">CACEIS</option>
+                      <option value="BNP">BNP</option>
+                      <option value="Bankinter">Bankinter</option>
+                    </select>
+                  ) : (
+                    <select 
+                      className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-brand-500 focus:border-brand-500 bg-white"
+                      value={formData.broker}
+                      onChange={e => setFormData({...formData, broker: e.target.value as any})}
+                    >
+                      <option value="GVC Gaesco">GVC Gaesco</option>
+                      <option value="Renta 4">Renta 4</option>
+                      <option value="Nomura">Nomura</option>
+                      <option value="Bestinver">Bestinver</option>
+                      <option value="Bankinter">Bankinter</option>
+                    </select>
+                  )}
                 </div>
               </div>
 
@@ -416,7 +582,7 @@ export const PostTrade: React.FC<PostTradeProps> = ({ orders, setOrders, onRetur
                       <DollarSign size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
                       <input 
                         type="number" 
-                        step="0.01"
+                        step="0.0001"
                         className="w-full pl-9 pr-3 py-2 border border-slate-300 rounded-lg focus:ring-brand-500 focus:border-brand-500"
                         value={formData.executionPrice}
                         onChange={e => setFormData({...formData, executionPrice: e.target.value})}
@@ -425,6 +591,22 @@ export const PostTrade: React.FC<PostTradeProps> = ({ orders, setOrders, onRetur
                   </div>
                 )}
               </div>
+
+              {/* Value Date for FX */}
+              {selectedOrder.operationType === 'Divisa' && (
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Fecha Valor</label>
+                  <div className="relative">
+                    <Calendar size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                    <input 
+                      type="date" 
+                      className="w-full pl-9 pr-3 py-2 border border-slate-300 rounded-lg focus:ring-brand-500 focus:border-brand-500"
+                      value={formData.valueDate}
+                      onChange={e => setFormData({...formData, valueDate: e.target.value})}
+                    />
+                  </div>
+                </div>
+              )}
 
               {/* Validity Date - Show if Limited */}
               {formData.orderType === 'Limitada' && (

@@ -10,8 +10,8 @@
     "lint": "tsc --noEmit"
   },
   "dependencies": {
-    "@google/genai": "^1.40.0",
-    "@supabase/supabase-js": "^2.100.0",
+    "@google/genai": "^1.43.0",
+    "@supabase/supabase-js": "^2.97.0",
     "jspdf": "2.5.1",
     "jspdf-autotable": "3.8.2",
     "lucide-react": "^0.563.0",
