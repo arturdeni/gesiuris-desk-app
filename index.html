@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Gesiuris Desk</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            fontFamily: {
+              sans: ['Inter', 'sans-serif'],
+            },
+            colors: {
+              // Mapping 'slate' to the corporate warm greys to automatically update all UI text/borders
+              slate: {
+                50: '#F9F5F5',  // Blanco
+                100: '#F2EBE9', // Very light warm grey
+                200: '#E6DED1', // Beige
+                300: '#D1C7C0', // Darker Beige/Grey
+                400: '#9E9E9C', // Medium Grey
+                500: '#757573',
+                600: '#666664',
+                700: '#575755', // Gris oscuro
+                800: '#3D3D3B',
+                900: '#000000', // Negro
+                950: '#000000',
+              },
+              // Corporate Brand Palette
+              brand: {
+                50: '#F9F5F5',  // Blanco
+                100: '#E6DED1', // Beige (used for light backgrounds)
+                200: '#E5D0D2', // Salmón medio
+                300: '#C9B2B4', // Interpolated
+                400: '#AB9395', // Interpolated
+                500: '#8E7577', // Salmón oscuro (Primary Action)
+                600: '#755E60', // Darker Salmon
+                700: '#575755', // Gris oscuro (Strong Brand)
+                800: '#3E3E3C',
+                900: '#000000', // Negro
+              }
+            }
+          }
+        }
+      }
+    </script>
+    <style>
+      body {
+        background-color: #F9F5F5; /* Blanco corporativo */
+        color: #575755; /* Gris oscuro base text */
+      }
+    </style>
+  <script type="importmap">
+{
+  "imports": {
+    "react-dom/": "https://esm.sh/react-dom@^19.2.4/",
+    "lucide-react": "https://esm.sh/lucide-react@^0.563.0",
+    "react/": "https://esm.sh/react@^19.2.4/",
+    "react": "https://esm.sh/react@^19.2.4",
+    "@google/genai": "https://esm.sh/@google/genai@^1.40.0",
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.1/package/xlsx.mjs",
+    "jspdf": "https://esm.sh/jspdf@2.5.1",
+    "jspdf-autotable": "https://esm.sh/jspdf-autotable@3.8.2"
+  }
+}
+</script>
+<link rel="stylesheet" href="/index.css">
+</head>
+  <body>
+    <div id="root"></div>
+  <script type="module" src="/index.tsx"></script>
+</body>
+</html>
